@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import { experimental_upgradeWebSocket, type WebSocketData } from "@vercel/functions";
 import UpstoxClient from "upstox-js-sdk";
 
@@ -34,70 +35,43 @@ function extractCandle(feed: Record<string, unknown>, instrumentKey: string) {
     instrumentKey,
     ltp: Number(ltpc.ltp || oneMinute.close || 0),
     ltt: Number(ltpc.ltt || feed.currentTs || Date.now()),
-    candle: {
-      time: Number(oneMinute.ts || feed.currentTs || Date.now()) / 1000,
-      open: Number(oneMinute.open),
-      high: Number(oneMinute.high),
-      low: Number(oneMinute.low),
-      close: Number(oneMinute.close),
-      volume: Number(oneMinute.vol || 0),
-    },
+    candle: { time: Number(oneMinute.ts || feed.currentTs || Date.now()) / 1000, open: Number(oneMinute.open), high: Number(oneMinute.high), low: Number(oneMinute.low), close: Number(oneMinute.close), volume: Number(oneMinute.vol || 0) },
   };
 }
 
 export async function GET() {
+  const cookieStore = await cookies();
+  const requestToken = cookieStore.get("upstox_access_token")?.value;
+  const token = requestToken || process.env.UPSTOX_ACCESS_TOKEN;
+
   return experimental_upgradeWebSocket((ws) => {
     let streamer: any = null;
     let subscribedSymbol = "RELIANCE";
     let subscribedKey = INSTRUMENTS.RELIANCE;
 
-    const disconnect = () => {
-      try { streamer?.disconnect?.(); } catch {}
-      streamer = null;
-    };
+    const disconnect = () => { try { streamer?.disconnect?.(); } catch {} streamer = null; };
 
     const startStreamer = (symbol: string) => {
-      const token = process.env.UPSTOX_ACCESS_TOKEN;
       const key = INSTRUMENTS[symbol];
-      if (!token || !key) {
-        ws.send(JSON.stringify({ type: "error", message: "Upstox is not configured" }));
-        return;
-      }
-
+      if (!token || !key) { ws.send(JSON.stringify({ type: "error", message: "Upstox is not configured" })); return; }
       disconnect();
       subscribedSymbol = symbol;
       subscribedKey = key;
-
       const client: any = UpstoxClient.ApiClient.instance;
       client.authentications["OAUTH2"].accessToken = token;
       streamer = new UpstoxClient.MarketDataStreamerV3([key], "full");
       streamer.autoReconnect?.(true, 5, 10);
-
-      streamer.on("open", () => {
-        try { streamer.subscribe([key], "full"); } catch {}
-        ws.send(JSON.stringify({ type: "connected", symbol, instrumentKey: key }));
-      });
-      streamer.on("message", (data: unknown) => {
-        const parsed = normalizeMessage(data);
-        if (!parsed) return;
-        const candle = extractCandle(parsed, subscribedKey);
-        if (candle) ws.send(JSON.stringify({ ...candle, symbol: subscribedSymbol }));
-      });
+      streamer.on("open", () => { try { streamer.subscribe([key], "full"); } catch {} ws.send(JSON.stringify({ type: "connected", symbol, instrumentKey: key })); });
+      streamer.on("message", (data: unknown) => { const parsed = normalizeMessage(data); if (!parsed) return; const candle = extractCandle(parsed, subscribedKey); if (candle) ws.send(JSON.stringify({ ...candle, symbol: subscribedSymbol })); });
       streamer.on("error", () => ws.send(JSON.stringify({ type: "error", message: "Upstox market feed error" })));
       streamer.on("close", () => ws.send(JSON.stringify({ type: "disconnected" })));
       streamer.connect();
     };
 
     ws.on("message", (data: WebSocketData) => {
-      try {
-        const message = normalizeMessage(data);
-        if (!message) return;
-        if (message.type === "subscribe") startStreamer(String(message.symbol || "RELIANCE").toUpperCase());
-      } catch {
-        ws.send(JSON.stringify({ type: "error", message: "Invalid WebSocket message" }));
-      }
+      const message = normalizeMessage(data);
+      if (message?.type === "subscribe") startStreamer(String(message.symbol || "RELIANCE").toUpperCase());
     });
-
     ws.on("close", disconnect);
     ws.on("error", disconnect);
     startStreamer("RELIANCE");
