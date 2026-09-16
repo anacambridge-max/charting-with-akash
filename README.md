@@ -1,25 +1,25 @@
 # PRIME TECHNICAL
 
-Standalone Next.js + Lightweight Charts trading chart using Upstox market data and the PRIME engine.
+Standalone Next.js + Lightweight Charts trading chart using Upstox V3 and the PRIME engine.
 
-## Local architecture
+## Production architecture
 
-- Next.js App Router frontend
-- Upstox historical candle API routes
-- Python Upstox V3 live bridge on `ws://localhost:8765`
-- PRIME engine in `lib/prime-engine.ts`
+- Next.js App Router on Vercel
+- Upstox historical candle API V3
+- Vercel WebSocket Function at `/api/ws`
+- Upstox Node.js `MarketDataStreamerV3` on the server side
+- PRIME engine in `lib/prime.ts`
 - Lightweight Charts for rendering
 
-## Important production note
+The browser never receives the Upstox access token. The server-side WebSocket bridge authenticates with Upstox and forwards normalized 1-minute candles to the browser.
 
-The current live bridge is a local Python WebSocket service. A Vercel deployment can host the Next.js application and HTTP/API routes, but `ws://localhost:8765` will point to the viewer's own machine, not this Mac. For public live streaming, move the Python bridge to a persistent server/service and expose it over secure `wss://`.
+## Vercel environment variables
 
-Do not commit `.env.local` or any Upstox credentials/tokens. Configure secrets in the deployment environment instead.
+- `UPSTOX_CLIENT_ID`
+- `UPSTOX_CLIENT_SECRET`
+- `UPSTOX_REDIRECT_URI`
+- `UPSTOX_ACCESS_TOKEN` (optional fallback; OAuth can set an HTTP-only cookie)
 
-## Local run
+Use the exact Vercel deployment URL in `UPSTOX_REDIRECT_URI`, ending with `/api/upstox/callback`, and register the same URI in Upstox.
 
-```bash
-npm install
-npm run dev
-python3 scripts/live_bridge.py
-```
+Never commit `.env.local` or access tokens.
